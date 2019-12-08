@@ -67,5 +67,20 @@ p5 <- trip_data %>%
   labs(x = "Hour of the day", y = "Total number of pickups") +
   theme(legend.position = "none")
 
+p5
 
 
+p6 <- trip_data %>%
+  mutate(hpick = hour(pickup_datetime)) %>%
+  group_by(hpick) %>%
+  count() %>%
+  ggplot(aes(reorder(hpick, -n), n, fill = hpick)) +
+  geom_col() +
+  scale_y_sqrt() +
+  labs(x = "Hour of the day", y = "Total number of pickups") +
+  theme(legend.position = "none")
+
+p6
+
+trip_data
+  
