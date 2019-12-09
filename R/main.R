@@ -1,6 +1,11 @@
 library(data.table)
 library(tidyverse)
 
+
+
+
+sample_n()
+
 zip1 <- 'https://drive.google.com/uc?id=0B3o2JsiUpwEvLTRDNkEyZmZZM1U&export=download'
 zip1csv <- data.table(read.table(unz(zip1, 'trip_fare_4.csv')))
 ?fread
@@ -15,6 +20,8 @@ str(bank)
 
 getwd()
 
+trip_fare[, .N, by = list(medallion, hack_license, vendor_id)]
+
 
 trip_fare <- fread('Data/trip_fare_4.csv')
 trip_data <- fread('Data/trip_data_4.csv')
@@ -22,6 +29,29 @@ trip_data <- fread('Data/trip_data_4.csv')
 trip_fare
 hist(trip_data$passenger_count)
 
+trip_data_bkp <- copy(trip_data)
+
+
+trip_data[passenger_count < 8, sample_n(100), by = list(passenger_count)]
+
+
+
+trip_data[, .N, by = hour(pickup_datetime)]
+set.seed(131)
+
+
+trip_data <- trip_data %>%
+  mutate(hpick = hour(pickup_datetime)) %>%
+  group_by(hpick, vendor_id) %>%
+  sample_n(1000)
+
+
+trip_data <- trip_data %>%
+  filter(passenger_count < 8) %>%
+  group_by(passenger_count) %>%
+  sample_n(100)
+
+setDT(trip_data)
 
 p1 <- trip_data %>%
   group_by(passenger_count) %>%
@@ -74,7 +104,7 @@ p6 <- trip_data %>%
   mutate(hpick = hour(pickup_datetime)) %>%
   group_by(hpick) %>%
   count() %>%
-  ggplot(aes(reorder(hpick, -n), n, fill = hpick)) +
+  ggplot(aes(reorder(hpick, -n), n, fill = reorder(hpick, -n))) +
   geom_col() +
   scale_y_sqrt() +
   labs(x = "Hour of the day", y = "Total number of pickups") +
