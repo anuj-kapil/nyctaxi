@@ -15,29 +15,38 @@ str(bank)
 
 getwd()
 
+gc()
 
 trip_fare <- fread('Data/trip_fare_4.csv')
 trip_data <- fread('Data/trip_data_4.csv')
-
-trip_fare[, .N]
-#15100468
-
-uniqueN(trip_fare, by = key(trip_fare))
-?uniqueN
-#15100414
-
-trip_data[,.N]
-#15100468
-
-uniqueN(trip_data)
-#15100459
-
-
 
 join_keycols <- names(trip_fare)[1:4]
 #td_keycols <- c(names(trip_data)[1:3], 'pickup_datetime')
 setkeyv(trip_fare, join_keycols)
 setkeyv(trip_data, join_keycols)
+
+trip_fare[, .N]
+#15100468
+
+uniqueN(trip_fare, by = key(trip_fare))
+#15099816
+
+uniqueN(trip_fare)
+#15100414
+
+trip_fare <- unique(trip_fare, by = key(trip_fare))
+
+
+trip_data[,.N]
+#15100468
+
+uniqueN(trip_data, by = key(trip_data))
+
+uniqueN(trip_data)
+#15100459
+
+trip_data <- unique(trip_data, by = key(trip_fare))
+
 
 trip_combined <- trip_fare[trip_data, nomatch = 0]
 trip_combined[, .N]
@@ -47,9 +56,10 @@ uniqueN(trip_combined)
 #15101654
 
 ?setkeyv
-trip_data[, sample_flg := sample(c(TRUE, FALSE), size = .N, replace = TRUE, prob = c(0.1, 0.9))]
+set.seed(131)
+trip_combined[, sample_flg := sample(c(TRUE, FALSE), size = .N, replace = TRUE, prob = c(0.1, 0.9))]
 
-trip_data_sample <- trip_data[sample_flg == T]
+trip_combined_sample <- trip_combined[sample_flg == T]
 
 
 trip_fare
@@ -67,7 +77,7 @@ p1 <- trip_data %>%
 p1
 
 
-p1_sample <- trip_data_sample %>%
+p1_sample <- trip_combined_sample %>%
   group_by(passenger_count) %>%
   count() %>%
   ggplot(aes(passenger_count, n, fill = passenger_count)) +
@@ -101,7 +111,7 @@ p4 <- trip_data %>%
 
 p4
 
-p4_sample <- trip_data_sample %>%
+p4_sample <- trip_combined_sample %>%
   mutate(wday = wday(pickup_datetime, label = TRUE)) %>%
   group_by(wday, vendor_id) %>%
   count() %>%
@@ -125,7 +135,7 @@ p5 <- trip_data %>%
 
 p5
 
-p5_sample <- trip_data_sample %>%
+p5_sample <- trip_combined_sample %>%
   mutate(hpick = hour(pickup_datetime)) %>%
   group_by(hpick, vendor_id) %>%
   count() %>%
@@ -149,7 +159,7 @@ p6 <- trip_data %>%
 
 p6
 
-p6_sample <- trip_data_sample %>%
+p6_sample <- trip_combined_sample %>%
   mutate(hpick = hour(pickup_datetime)) %>%
   group_by(hpick) %>%
   count() %>%
