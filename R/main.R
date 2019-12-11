@@ -5,14 +5,15 @@ zip1 <- 'https://drive.google.com/uc?id=0B3o2JsiUpwEvLTRDNkEyZmZZM1U&export=down
 zip1csv <- data.table(read.table(unz(zip1, 'trip_fare_4.csv')))
 ?fread
 
-con <- gzcon(url(paste("http://dumps.wikimedia.org/other/articlefeedback/",
-                       "aa_combined-20110321.csv.gz", sep="")))
+url_csv_gz <- 'http://github.com/anuj-kapil/nyctaxi/blob/master/Data/trip_combined_sample.csv.gz?raw=true'
+
+con <- gzcon(url(url_csv_gz))
 txt <- readLines(con)
 dat <- read.csv(textConnection(txt))
 
 
-temp <- tempfile(fileext = ".zip")
-download.file(zip1, temp)
+temp <- tempfile(fileext = ".gz")
+download.file(url_csv_gz, temp)
 out <- unzip(temp, exdir = tempdir())
 
 bank <- read.csv(out[14], sep = ";")
