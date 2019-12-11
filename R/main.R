@@ -60,7 +60,6 @@ trip_combined[, .N]
 uniqueN(trip_combined)
 #15101654
 
-?setkeyv
 set.seed(131)
 trip_combined[, sample_flg := sample(c(TRUE, FALSE), size = .N, replace = TRUE, prob = c(0.1, 0.9))]
 
@@ -69,20 +68,20 @@ trip_combined_sample <- trip_combined[sample_flg == T]
 fwrite(trip_combined_sample, 'Data/trip_combined_sample.csv')
 
 trip_fare
-hist(trip_data$passenger_count)
+hist(trip_combined_sample$passenger_count)
 
 
-p1 <- trip_data %>%
-  group_by(passenger_count) %>%
-  count() %>%
-  ggplot(aes(passenger_count, n, fill = passenger_count)) +
-  geom_col() +
-  scale_y_sqrt() +
-  theme(legend.position = "none")
+# p1 <- trip_data %>%
+#   group_by(passenger_count) %>%
+#   count() %>%
+#   ggplot(aes(passenger_count, n, fill = passenger_count)) +
+#   geom_col() +
+#   scale_y_sqrt() +
+#   theme(legend.position = "none")
+# 
+# p1
 
-p1
-
-
+trip_combined_sample$passenger_count <- as.factor(trip_combined_sample$passenger_count)
 p1_sample <- trip_combined_sample %>%
   group_by(passenger_count) %>%
   count() %>%
@@ -93,29 +92,104 @@ p1_sample <- trip_combined_sample %>%
 
 p1_sample
 
-summary(trip_data)
-ggplot(data=trip_data, aes(x=passenger_count)) + 
-  geom_histogram(breaks=seq(0, 10, by=1), 
-                 col="red", 
-                 fill="green", 
-                 alpha = .2) + 
-  labs(title="Histogram for Passenger Count", x="Passenger Count", y="Count") + 
-  xlim(c(-1,10)) 
+# summary(trip_combined_sample)
+# ggplot(data=trip_combined_sample, aes(x=passenger_count)) + 
+#   geom_histogram(breaks=seq(0, 10, by=1), 
+#                  col="red", 
+#                  fill="green", 
+#                  alpha = .2) + 
+#   labs(title="Histogram for Passenger Count", x="Passenger Count", y="Count") + 
+#   xlim(c(-1,10)) 
  #+ 
 #  ylim(c(0,30))
 
-library(lubridate)
+# 
+# p4 <- trip_data %>%
+#   mutate(wday = wday(pickup_datetime, label = TRUE)) %>%
+#   group_by(wday, vendor_id) %>%
+#   count() %>%
+#   ggplot(aes(wday, n, colour = vendor_id)) +
+#   geom_point(size = 4) +
+#   labs(x = "Day of the week", y = "Total number of pickups") +
+#   theme(legend.position = "none")
+# 
+# p4
 
-p4 <- trip_data %>%
-  mutate(wday = wday(pickup_datetime, label = TRUE)) %>%
-  group_by(wday, vendor_id) %>%
+
+trip_combined_sample$payment_type <- as.factor(trip_combined_sample$payment_type)
+p2_sample <- trip_combined_sample %>%
+  group_by(payment_type) %>%
   count() %>%
-  ggplot(aes(wday, n, colour = vendor_id)) +
-  geom_point(size = 4) +
-  labs(x = "Day of the week", y = "Total number of pickups") +
+  ggplot(aes(payment_type, n, fill = payment_type)) +
+  geom_col() +
+  scale_y_sqrt() +
   theme(legend.position = "none")
 
-p4
+p2_sample
+
+
+summary(trip_combined_sample)
+hist(trip_combined_sample$fare_amount)
+p3_sample <- trip_combined_sample %>%
+  ggplot(aes(fare_amount)) +
+  geom_histogram(binwidth = 20) +
+  #scale_y_sqrt() +
+  theme(legend.position = "none")
+
+p3_sample
+
+p3_filtered_sample <- trip_combined_sample %>%
+  filter(fare_amount<=75) %>%
+  ggplot(aes(fare_amount)) +
+  geom_histogram(binwidth = 5) +
+#scale_y_sqrt() +
+theme(legend.position = "none")
+
+p3_filtered_sample
+
+
+hist(trip_combined_sample$tip_amount)
+
+
+p4_sample <- trip_combined_sample %>%
+  ggplot(aes(tip_amount)) +
+  geom_histogram(binwidth = 10) +
+  #scale_y_sqrt() +
+  theme(legend.position = "none")
+
+p4_sample
+
+p4_filtered_sample <- trip_combined_sample %>%
+  filter(tip_amount<=20) %>%
+  ggplot(aes(tip_amount)) +
+  geom_histogram(binwidth = 2.5) +
+  #scale_y_sqrt() +
+  theme(legend.position = "none")
+
+p4_filtered_sample
+
+
+
+hist(trip_combined_sample$total_amount)
+p5_sample <- trip_combined_sample %>%
+  ggplot(aes(total_amount)) +
+  geom_histogram(binwidth = 20) +
+  #scale_y_sqrt() +
+  theme(legend.position = "none")
+
+p5_sample
+
+p5_filtered_sample <- trip_combined_sample %>%
+  filter(total_amount<=75) %>%
+  ggplot(aes(total_amount)) +
+  geom_histogram(binwidth = 5) +
+  #scale_y_sqrt() +
+  theme(legend.position = "none")
+
+p5_filtered_sample
+
+summary(trip_combined_sample$trip_time_in_secs)
+trip_combined_sample[, sd(trip_time_in_secs)]
 
 p4_sample <- trip_combined_sample %>%
   mutate(wday = wday(pickup_datetime, label = TRUE)) %>%
