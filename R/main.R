@@ -1,9 +1,14 @@
 library(data.table)
 library(tidyverse)
-
+library(lubridate)
 zip1 <- 'https://drive.google.com/uc?id=0B3o2JsiUpwEvLTRDNkEyZmZZM1U&export=download'
 zip1csv <- data.table(read.table(unz(zip1, 'trip_fare_4.csv')))
 ?fread
+
+con <- gzcon(url(paste("http://dumps.wikimedia.org/other/articlefeedback/",
+                       "aa_combined-20110321.csv.gz", sep="")))
+txt <- readLines(con)
+dat <- read.csv(textConnection(txt))
 
 
 temp <- tempfile(fileext = ".zip")
@@ -21,7 +26,6 @@ trip_fare <- fread('Data/trip_fare_4.csv')
 trip_data <- fread('Data/trip_data_4.csv')
 
 join_keycols <- names(trip_fare)[1:4]
-#td_keycols <- c(names(trip_data)[1:3], 'pickup_datetime')
 setkeyv(trip_fare, join_keycols)
 setkeyv(trip_data, join_keycols)
 
@@ -61,6 +65,7 @@ trip_combined[, sample_flg := sample(c(TRUE, FALSE), size = .N, replace = TRUE, 
 
 trip_combined_sample <- trip_combined[sample_flg == T]
 
+fwrite(trip_combined_sample, 'Data/trip_combined_sample.csv')
 
 trip_fare
 hist(trip_data$passenger_count)
