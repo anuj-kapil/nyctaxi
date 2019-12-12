@@ -253,6 +253,26 @@ p6_sample
 
 
 trip_data
-  
 
+hist(trip_combined_sample$pickup_longitude)
+
+trip_combined_sample <- fread('Data/trip_combined_sample.csv.gz')
+trip_combined_sample[, .N]
+
+# oultier analysis
+
+ggplot(trip_combined_sample, aes(x="pickup_latitude", y=pickup_latitude))+geom_boxplot()
+
+trip_combined_sample <- trip_combined_sample[pickup_latitude %between% c(-90, 90) & pickup_longitude %between% c(-180, 180)]
+trip_combined_sample[, .N]
+
+trip_combined_sample <- trip_combined_sample[pickup_latitude %between% c(30, 50) & pickup_longitude %between% c(-84, -64)]
+
+
+ggplot(trip_combined_sample, aes(x="pickup_longitude", y=pickup_longitude))+geom_boxplot()
+
+boxplot.stats(trip_combined_sample$pickup_longitude)
+  ggplot(trip_combined_sample, aes(x=pickup_latitude, y=pickup_longitude))+geom_point()
+
+summary(trip_combined_sample)
 
