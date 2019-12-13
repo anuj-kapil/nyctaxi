@@ -319,16 +319,98 @@ library(plotly)
 
 ggplot(trip_combined_sample, aes(x="pickup_latitude", y=pickup_latitude))+geom_boxplot()
 
+# Lat long range
 trip_combined_sample <- trip_combined_sample[pickup_latitude %between% c(-90, 90) & pickup_longitude %between% c(-180, 180)]
 trip_combined_sample[, .N]
 
+# NYC range within 1000 kms radius
 trip_combined_sample <- trip_combined_sample[pickup_latitude %between% c(30, 50) & pickup_longitude %between% c(-84, -64)]
 
 
 ggplot(trip_combined_sample, aes(x="pickup_longitude", y=pickup_longitude))+geom_boxplot()
 
 boxplot.stats(trip_combined_sample$pickup_longitude)
-ggplot(trip_combined_sample, aes(x=pickup_latitude, y=pickup_longitude))+geom_point()
+ggplot(head(trip_combined_sample, 1000), aes(x=pickup_longitude, y=pickup_latitude), size = 0.5)+geom_point()
 
 summary(trip_combined_sample)
 
+?rasterGrob
+library(leaflet)
+
+?addProviderTiles
+
+leaflet(data = head(trip_combined_sample, 1000)) %>%
+  addTiles()%>%
+  #addProviderTiles("Stamen.TonerLite")%>%
+  #addProviderTiles("Esri.NatGeoWorldMap") %>%
+  addCircleMarkers(~ pickup_longitude, ~pickup_latitude, radius = 1,
+                   color = "navy", fillOpacity = 0.3)
+
+# Missing data
+
+summary(trip_combined_sample)
+trip_combined_sample <- trip_combined_sample[!is.na(dropoff_longitude) & !is.na(dropoff_latitude)]
+
+# Remove zero distance trips
+
+trip_combined_sample <- trip_combined_sample[trip_distance > 0]
+
+
+# Mean Fare amount and mean distance
+trip_combined_sample[ , .(mean(fare_amount), mean(trip_distance)), by = list(passenger_count)]
+
+# Mean fare amount per unit distance
+trip_combined_sample[ , .(sum(fare_amount)/sum(trip_distance)), by = list(passenger_count)]
+
+
+# Plotting fare against distance
+ggplot(head(trip_combined_sample, 1000), aes(x=fare_amount, y=trip_distance))+geom_point()
+
+# Linear relationship
+
+# The vertical line in the plot might indicate again the fixed fare trips to/from JFK airport.
+
+jfk = c(-73.7822222222, 40.6441666667)
+nyc = c(-74.0063889, 40.7141667)
+ewr = c(-74.175, 40.69) # Newark Liberty International Airport, see https://www.travelmath.com/airport/EWR
+lgr = c(-73.87, 40.77) # LaGuardia Airport, see https://www.travelmath.com/airport/LGA
+
+# hist where pickup from JFK
+hist(trip_combined_sample[round(pickup_latitude,2) == 40.64 & round(pickup_longitude,2) == -73.78]$fare_amount)
+
+# hist where drop-off JFK
+hist(trip_combined_sample[round(dropoff_latitude,2) == 40.64 & round(dropoff_longitude,2) == -73.78]$fare_amount)
+
+
+trip_combined_sample[, fare_per_dist := fare_amount/trip_distance]
+
+
+trip_combined_sample[fare_per_dist == 250]
+ggplot(head(trip_combined_sample, 10000), aes(x=trip_distance, y=fare_per_dist))+geom_point()
+
+summary(trip_combined_sample)
+
+trip_combined_sample[, pickup_datetime_dt := as.POSIXct(pickup_datetime,format="%Y-%m-%d %H:%M:%OS")]
+
+plot_mean_fare_per_dist <- trip_combined_sample[, .(mean_fare_per_dist = mean(fare_per_dist)) , by = hour(pickup_datetime_dt)]
+
+ggplot(plot_mean_fare_per_dist, aes(x=hour, y=mean_fare_per_dist))+geom_line(color = 'red')
+
+plot_mean_time <- trip_combined_sample[, .(mean_time = mean(trip_time_in_secs)) , by = hour(pickup_datetime_dt)]
+
+ggplot(plot_mean_time, aes(x=hour, y=mean_time))+geom_line(color = 'red')
+
+
+plot_mean_time_fare <- trip_combined_sample[, .(mean_fare_per_dist = mean(fare_per_dist), mean_time = mean(trip_time_in_secs/60)) , by = hour(pickup_datetime_dt)]
+
+ggplot(plot_mean_time_fare) +
+  geom_line(aes(x=hour, y=mean_fare_per_dist), color = 'red') + 
+  geom_line(aes(x=hour, y=mean_time), color = 'blue')
+
+install.packages('geosphere')
+library(geosphere)
+
+trip_combined_sample[, list(pickup_longitude, pickup_latitude)]
+trip_combined_sample$pickup_dist_from_city <- distm(trip_combined_sample[,list(pickup_longitude, pickup_latitude)], nyc, fun = distHaversine)
+
+hist(trip_combined_sample$pickup_dist_from_city)
