@@ -2,9 +2,16 @@
 title: "main"
 output: html_document
 ---
+# Loading R libraries
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+The following R libraries have been used for the analysis.  
+
+```{r setup, include=TRUE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
 # Install CRAN packages
 list.of.packages <- c(
   "data.table",
@@ -12,430 +19,508 @@ list.of.packages <- c(
   "lubridate",
   "plotly",
   "leaflet",
-  "geosphere"
+  "geosphere",
+  "ggthemes"
 )
 
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[, "Package"])]
 if (length(new.packages)) install.packages(new.packages, repos = "https://cran.rstudio.com/", dependencies = T)
 
-
+suppressWarnings(suppressMessages(suppressPackageStartupMessages({
 library(data.table)
 library(tidyverse)
 library(lubridate)
 library(plotly)
 library(leaflet)
 library(geosphere)
+library(ggthemes)
+})))
+```
+
+# Preparing Data
+
+## Load Datasets
+
+The zipped files were downloaded manually from the link provided and decompressed to extract the CSVs.  
+The CSVs are loaded in to memory using the *fread* function from the **data.table** package  
+
+```{r eval=FALSE, include=TRUE}
+trip_fare <- fread('../Data/trip_fare_4.csv')
+trip_data <- fread('../Data/trip_data_4.csv')
+```
+
+## Merge two datasets
+
+Let's merge the two datasets to create a single dataset containing all the information.  
+Since the data does not comes with a data dictionary, we will try to define the primary key for the two datasets. Ideally, a unique trip can be identified by taxi identifier, with a given pick-up datetime.
+
+* medallion - unique taxi permit
+* hack_license - unique taxi license number
+* vendor_id - Taxi service provider company
+* pickup_datetime - Adding in time component to uniquely identify a single trip
+
+Based on the primary keys, we will identify if we have duplicates in the two datasets before merging them.  
+
+```{r eval=FALSE, include=TRUE}
+join_keycols <- names(trip_fare)[1:4]
+setkeyv(trip_fare, join_keycols)
+setkeyv(trip_data, join_keycols)
+
+# Number of records in trip fare dataset
+trip_fare[, .N]
+#15100468
+
+# Unique records in trip fare dataset by the primary key
+uniqueN(trip_fare, by = key(trip_fare))
+#15099816
+
+# Number of records in trip data dataset
+trip_data[,.N]
+#15100468
+
+# Unique records in trip data dataset by the primary key
+uniqueN(trip_data, by = key(trip_data))
+#15099816
+```
+Looking at the statistics above and based on the defined primary key to identify a unique trip, we do see some duplicates in both the datasets. We need to ensure the duplicates are removed and both datasets contains same trips before merging them.
+
+```{r eval=FALSE, include=TRUE}
+trip_fare <- unique(trip_fare, by = key(trip_fare))
+trip_data <- unique(trip_data, by = key(trip_data))
+
+# Inner JOIN makes sure that we have only the common trips from both the datasets
+trip_combined <- trip_fare[trip_data, nomatch = 0]
+trip_combined[, .N]
+#15099816
+```
+
+## Sample dataset
+
+Since the dataset is large and resources are limited, we will work with a sample of the data instead of the entire dataset. Here, we are taking a random sample of 10% of the entire dataset. Seed is set before taking the sample to make sure the results are reproducible everytime the code is re-run. We will save the sample dataset to a file so that we don't have to repeat these steps everytime the code is re-run and instead read the sample dataset directly from disk.  
+
+```{r eval=FALSE, include=TRUE}
+set.seed(131)
+
+# Randomly select 10% of the records
+trip_combined[, sample_flg := sample(c(TRUE, FALSE), size = .N, replace = TRUE, prob = c(0.1, 0.9))]
+
+# Subset the 10% of the records as a sampe dataset
+trip_combined_sample <- trip_combined[sample_flg == T]
+
+# Save the contents to disk
+fwrite(trip_combined_sample, '../Data/trip_combined_sample.csv')
+
+# Compress the csv
+system(sprintf("gzip -f ../Data/trip_combined_sample.csv"))
+```
+
+## Load the sample dataset
+
+```{r}
+trip_combined_sample <- fread('../Data/trip_combined_sample.csv.gz')
 ```
 
 # Exploratory Data Analysis
 
 ## Descriptive Statistics
-The zipped files were downloaded manually from the link provided and decompressed.
+
+Let's look at the data type of the different variables we have in the dataset.
 
 ```{r}
-trip_fare <- fread('../Data/trip_fare_4.csv')
-trip_data <- fread('../Data/trip_data_4.csv')
+glimpse(trip_combined_sample)
+```
+The date times are read as strings (character) format. Let's convert date strings to date time format in R  
 
-summary(trip_fare)
-summary(trip_data)
+```{r}
+trip_combined_sample[, pickup_datetime := as.POSIXct(pickup_datetime,format="%Y-%m-%d %H:%M:%OS")]
+trip_combined_sample[, dropoff_datetime := as.POSIXct(dropoff_datetime,format="%Y-%m-%d %H:%M:%OS")]
 ```
 
+Summary of data shows that the taxi trips are recorded for only a month, and is from April 2013.
 
-## Merge two datasets
-
-Let's merge the two datasets to create a single dataset containing all the information.  
-Since the data does not comes with a data dictionary, we will try to define the primary key for the two datasets.  
-
-* medallion
-* hack_license
-* vendor_id
-* pickup_datetime
-
-Based on the primary keys, we will identify if we have duplicates in the two datasets before merging them.
-
-```{r eval=FALSE}
-###########################################
-# Prepare sample dataset
-
-
-join_keycols <- names(trip_fare)[1:4]
-setkeyv(trip_fare, join_keycols)
-setkeyv(trip_data, join_keycols)
-
-trip_fare[, .N]
-#15100468
-
-uniqueN(trip_fare, by = key(trip_fare))
-#15099816
-
-uniqueN(trip_fare)
-#15100414
-
-trip_fare <- unique(trip_fare, by = key(trip_fare))
-
-trip_data[,.N]
-#15100468
-
-uniqueN(trip_data, by = key(trip_data))
-
-uniqueN(trip_data)
-#15100459
-
-trip_data <- unique(trip_data, by = key(trip_fare))
-
-trip_combined <- trip_fare[trip_data, nomatch = 0]
-trip_combined[, .N]
-#15101772
-```
-
-Since the dataset is large and resources are limited, we will work with a sample of the data instead of the entire dataset. Here we are taking a random sample of 10% of the entire dataset. Seed is set before taking the sample to make sure the results are reproducible.
-
-```{r eval=FALSE}
-set.seed(131)
-trip_combined[, sample_flg := sample(c(TRUE, FALSE), size = .N, replace = TRUE, prob = c(0.1, 0.9))]
-
-trip_combined_sample <- trip_combined[sample_flg == T]
-
-#fwrite(trip_combined_sample, 'Data/trip_combined_sample.csv')
-###########################################
-```
-
-
-
-```{r eval=FALSE, include=FALSE}
-trip_combined_sample <- fread('Data/trip_combined_sample.csv.gz')
-
-hist(trip_combined_sample$passenger_count)
-
-# p1 <- trip_data %>%
-#   group_by(passenger_count) %>%
-#   count() %>%
-#   ggplot(aes(passenger_count, n, fill = passenger_count)) +
-#   geom_col() +
-#   scale_y_sqrt() +
-#   theme(legend.position = "none")
-# 
-# p1
-
-trip_combined_sample$passenger_count <- as.factor(trip_combined_sample$passenger_count)
-p1_sample <- trip_combined_sample %>%
-  group_by(passenger_count) %>%
-  count() %>%
-  ggplot(aes(passenger_count, n, fill = passenger_count)) +
-  geom_col() +
-  scale_y_sqrt() +
-  theme(legend.position = "none")
-
-p1_sample
-
-# summary(trip_combined_sample)
-# ggplot(data=trip_combined_sample, aes(x=passenger_count)) + 
-#   geom_histogram(breaks=seq(0, 10, by=1), 
-#                  col="red", 
-#                  fill="green", 
-#                  alpha = .2) + 
-#   labs(title="Histogram for Passenger Count", x="Passenger Count", y="Count") + 
-#   xlim(c(-1,10)) 
-#+ 
-#  ylim(c(0,30))
-
-# 
-# p4 <- trip_data %>%
-#   mutate(wday = wday(pickup_datetime, label = TRUE)) %>%
-#   group_by(wday, vendor_id) %>%
-#   count() %>%
-#   ggplot(aes(wday, n, colour = vendor_id)) +
-#   geom_point(size = 4) +
-#   labs(x = "Day of the week", y = "Total number of pickups") +
-#   theme(legend.position = "none")
-# 
-# p4
-
-
-trip_combined_sample$payment_type <- as.factor(trip_combined_sample$payment_type)
-p2_sample <- trip_combined_sample %>%
-  group_by(payment_type) %>%
-  count() %>%
-  ggplot(aes(payment_type, n, fill = payment_type)) +
-  geom_col() +
-  scale_y_sqrt() +
-  theme(legend.position = "none")
-
-p2_sample
-
-
+```{r}
 summary(trip_combined_sample)
-hist(trip_combined_sample$fare_amount)
-p3_sample <- trip_combined_sample %>%
-  ggplot(aes(fare_amount)) +
-  geom_histogram(binwidth = 20) +
-  #scale_y_sqrt() +
-  theme(legend.position = "none")
+```
+## Missing Data Analysis
 
-p3_sample
+The summary statistics shows that there are missing values only for two of the variables, *dropoff_longitude* and *dropoff_latitude*
+There are techniques to analyse missing values with missing at random or missing completely at random or missing not at random. And, there are techniques to treat the missing values like removing the entire record containing missing values or imputing the missing values with mean, median or some fixed values. But for the purpose of this analysis, we will simple remove them as the missing obersvations are a tiny proportion of the sample dataset.  
 
-p3_filtered_sample <- trip_combined_sample %>%
-  filter(fare_amount<=75) %>%
-  ggplot(aes(fare_amount)) +
-  geom_histogram(binwidth = 5) +
-  #scale_y_sqrt() +
-  theme(legend.position = "none")
+```{r}
+# Remove the null values from drop-off lat and long
+trip_combined_sample <- trip_combined_sample[!is.na(dropoff_longitude) & !is.na(dropoff_latitude)]
+```
 
-p3_filtered_sample
+## Outlier Analysis & Data Cleaning
 
+From the summary statistics, looking at the range of the values of lat and long, it appears the data is either incorrect or the lat long are captured in a multiple formats.  
+Assuming lat and long are captured in degrees (decimal) format, we will remove any erroneous data that does not conforms with the degrees (decimal) format.  
+Since the latitudes range from -90 to 90 and longitudes range from -180 to 180, any data that is outside that range will be removed from the dataset.  
 
-hist(trip_combined_sample$tip_amount)
-
-
-p4_sample <- trip_combined_sample %>%
-  ggplot(aes(tip_amount)) +
-  geom_histogram(binwidth = 10) +
-  #scale_y_sqrt() +
-  theme(legend.position = "none")
-
-p4_sample
-
-p4_filtered_sample <- trip_combined_sample %>%
-  filter(tip_amount<=20) %>%
-  ggplot(aes(tip_amount)) +
-  geom_histogram(binwidth = 2.5) +
-  #scale_y_sqrt() +
-  theme(legend.position = "none")
-
-p4_filtered_sample
-
-
-
-hist(trip_combined_sample$total_amount)
-p5_sample <- trip_combined_sample %>%
-  ggplot(aes(total_amount)) +
-  geom_histogram(binwidth = 20) +
-  #scale_y_sqrt() +
-  theme(legend.position = "none")
-
-p5_sample
-
-p5_filtered_sample <- trip_combined_sample %>%
-  filter(total_amount<=75) %>%
-  ggplot(aes(total_amount)) +
-  geom_histogram(binwidth = 5) +
-  #scale_y_sqrt() +
-  theme(legend.position = "none")
-
-p5_filtered_sample
-
-summary(trip_combined_sample$trip_time_in_secs)
-
-hist(trip_combined_sample$trip_time_in_secs)
-
-
-ggplot(data=trip_combined_sample, aes(x=trip_time_in_secs)) +
-  geom_histogram(breaks=seq(0, 10, by=1),
-                 col="red",
-                 fill="green",
-                 alpha = .2) +
-  labs(title="Histogram for Passenger Count", x="Passenger Count", y="Count") +
-  xlim(c(-1,10))
-
-10000/60/60
-
-
-plot_sd <- trip_combined_sample[, sd(trip_time_in_secs), by = cut_interval(trip_time_in_secs/60/60, 12)]
-
-ggplot(data=plot_sd, aes(x=cut_interval, y = V1, fill = cut_interval)) +
-  geom_col() +
-  labs(title="Histogram", x="Time interval", y="Count")
-
-trip_combined_sample[trip_time_in_secs <= 15*60, sd(trip_time_in_secs)]
-
-trip_combined_sample[trip_time_in_secs <= 30*60, sd(trip_time_in_secs)]
-
-trip_combined_sample[trip_time_in_secs > 30*60, sd(trip_time_in_secs)]
-
-trip_combined_sample[trip_time_in_secs > 4*30*60, sd(trip_time_in_secs)]
-
-
-
-plot_sd_fare <- trip_combined_sample[, sd(total_amount), by = cut_interval(total_amount, 20)]
-
-ggplot(data=plot_sd_fare, aes(x=cut_interval, y = V1, fill = cut_interval)) +
-  geom_col() +
-  labs(title="Histogram", x="Fare interval", y="Count")
-
-
-
-
-
-
-
-
-p4_sample <- trip_combined_sample %>%
-  mutate(wday = wday(pickup_datetime, label = TRUE)) %>%
-  group_by(wday, vendor_id) %>%
-  count() %>%
-  ggplot(aes(wday, n, colour = vendor_id)) +
-  geom_point(size = 4) +
-  labs(x = "Day of the week", y = "Total number of pickups") +
-  theme(legend.position = "none")
-
-p4_sample
-
-
-
-p5 <- trip_data %>%
-  mutate(hpick = hour(pickup_datetime)) %>%
-  group_by(hpick, vendor_id) %>%
-  count() %>%
-  ggplot(aes(hpick, n, color = vendor_id)) +
-  geom_point(size = 4) +
-  labs(x = "Hour of the day", y = "Total number of pickups") +
-  theme(legend.position = "none")
-
-p5
-
-p5_sample <- trip_combined_sample %>%
-  mutate(hpick = hour(pickup_datetime)) %>%
-  group_by(hpick, vendor_id) %>%
-  count() %>%
-  ggplot(aes(hpick, n, color = vendor_id)) +
-  geom_point(size = 4) +
-  labs(x = "Hour of the day", y = "Total number of pickups") +
-  theme(legend.position = "none")
-
-p5_sample
-
-
-p6 <- trip_data %>%
-  mutate(hpick = hour(pickup_datetime)) %>%
-  group_by(hpick) %>%
-  count() %>%
-  ggplot(aes(reorder(hpick, -n), n, fill = reorder(hpick, -n))) +
-  geom_col() +
-  scale_y_sqrt() +
-  labs(x = "Hour of the day", y = "Total number of pickups") +
-  theme(legend.position = "none")
-
-p6
-
-p6_sample <- trip_combined_sample %>%
-  mutate(hpick = hour(pickup_datetime)) %>%
-  group_by(hpick) %>%
-  count() %>%
-  ggplot(aes(reorder(hpick, -n), n, fill = reorder(hpick, -n))) +
-  geom_col() +
-  scale_y_sqrt() +
-  labs(x = "Hour of the day", y = "Total number of pickups") +
-  theme(legend.position = "none")
-
-p6_sample
-
-
-trip_data
-
-
-trip_combined_sample[, .N]
-
-hist(trip_combined_sample$pickup_latitude)
-
-
-ggplot(head(trip_combined_sample, 1000), aes(x=pickup_longitude, y= pickup_latitude), size=2200) +
-  geom_point()
-
-
-#plot_ly(data = trip_combined_sample, x = ~pickup_longitude, y = ~pickup_latitude)
-
-# oultier analysis
-
-ggplot(trip_combined_sample, aes(x="pickup_latitude", y=pickup_latitude))+geom_boxplot()
-
-# Lat long range
+```{r}
+# Lat long range (lat from -90 to 90 and long from -180 to 180)
 trip_combined_sample <- trip_combined_sample[pickup_latitude %between% c(-90, 90) & pickup_longitude %between% c(-180, 180)]
-trip_combined_sample[, .N]
 
-# NYC range within 1000 kms radius
+trip_combined_sample <- trip_combined_sample[dropoff_latitude %between% c(-90, 90) & dropoff_longitude %between% c(-180, 180)]
+```
+The range of lat and long is now within the standard range but it is still too large considering the data is only from New York taxi services.
+
+```{r}
+summary(trip_combined_sample$pickup_latitude)
+summary(trip_combined_sample$pickup_longitude)
+summary(trip_combined_sample$dropoff_latitude)
+summary(trip_combined_sample$dropoff_longitude)
+```
+
+The histograms and box plots for the various lat and longs shows that most of the data points are concentatrated around a specific cordinates but some of the trips are spread all over the world.
+
+```{r}
+hist(trip_combined_sample$pickup_latitude,
+      main="Histogram for Pickup Latitude", 
+      xlab="Pickup Latitude", 
+      border="black", 
+      col="lightblue")
+
+ggplot(trip_combined_sample, aes(x="pickup_latitude", y=pickup_latitude)) +
+  geom_boxplot() +
+  labs(x = "", y = "")+
+  ggtitle("Box Plot for Pickup Latitude") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "none") + 
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  scale_colour_tableau()
+```
+
+We know that NYC is in northern hemisphere. Some of the pickups are from equator (latitude = 0) and some are from southern hemisphere.  
+Clearly data is either wrongly captured or there were errors in capturing the data.  
+
+```{r}
+hist(trip_combined_sample$pickup_longitude,
+     main="Histogram for Pickup Longitude", 
+     xlab="Pickup Longitude", 
+     border="black", 
+     col="lightblue")
+
+ggplot(trip_combined_sample, aes(x="pickup_longitude", y=pickup_longitude)) +
+  geom_boxplot() +
+  labs(x = "", y = "")+
+  ggtitle("Box Plot for Pickup Longitude") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "none") + 
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  scale_colour_tableau()
+
+hist(trip_combined_sample$dropoff_latitude,
+     main="Histogram for Dropoff Latitude", 
+     xlab="Dropoff Latitude", 
+     border="black", 
+     col="lightblue")
+
+ggplot(trip_combined_sample, aes(x="dropoff_latitude", y=dropoff_latitude)) +
+  geom_boxplot() +
+  labs(x = "", y = "")+
+  ggtitle("Box Plot for Dropoff Latitude") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "none") + 
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  scale_colour_tableau()
+
+hist(trip_combined_sample$dropoff_longitude,
+     main="Histogram for Dropoff Longitude", 
+     xlab="Dropoff Longitude", 
+     border="black", 
+     col="lightblue")
+
+ggplot(trip_combined_sample, aes(x="dropoff_longitude", y=dropoff_longitude)) +
+  geom_boxplot() +
+  labs(x = "", y = "")+
+  ggtitle("Box Plot for Dropoff Longitude") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none") + 
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  scale_colour_tableau()
+```
+
+Since we are dealing with New York data, the lat and long can further be limited to New York and nearby. NYC coordinates are 40.7141667 lat and -74.0063889 long and if we restrict the pickups and drops within 1000 km radius, we should have a reliable dataset about the NYC taxi trips only 
+
+```{r}
+# NYC range within 1000 kms radius (1 degree equal appox 111 kms) and NYC coordinates are 40.7141667 lat and -74.0063889 long
 trip_combined_sample <- trip_combined_sample[pickup_latitude %between% c(30, 50) & pickup_longitude %between% c(-84, -64)]
 
+trip_combined_sample <- trip_combined_sample[dropoff_latitude %between% c(30, 50) & dropoff_longitude %between% c(-84, -64)]
 
-ggplot(trip_combined_sample, aes(x="pickup_longitude", y=pickup_longitude))+geom_boxplot()
+#boxplot.stats(trip_combined_sample$pickup_longitude)
+```
 
-boxplot.stats(trip_combined_sample$pickup_longitude)
-ggplot(head(trip_combined_sample, 1000), aes(x=pickup_longitude, y=pickup_latitude), size = 0.5)+geom_point()
+Let's visualize the pick-up lat longs on the map. We can see that most of trips are concentrated around Manhattan borough (often referred as the city) and some of the pick-ups are from nearby airports.  
 
-summary(trip_combined_sample)
-
-
+```{r}
 leaflet(data = head(trip_combined_sample, 1000)) %>%
   addTiles()%>%
   #addProviderTiles("Stamen.TonerLite")%>%
   #addProviderTiles("Esri.NatGeoWorldMap") %>%
   addCircleMarkers(~ pickup_longitude, ~pickup_latitude, radius = 1,
                    color = "navy", fillOpacity = 0.3)
+```
 
-# Missing data
+Some of the trips have a trip distance of 0 and some have trip duration of 0. For this analysis, we will drop them from our datasets  
 
-summary(trip_combined_sample)
-trip_combined_sample <- trip_combined_sample[!is.na(dropoff_longitude) & !is.na(dropoff_latitude)]
-
+```{r}
 # Remove zero distance trips
-
 trip_combined_sample <- trip_combined_sample[trip_distance > 0]
 
+# Remove zero time trips
+trip_combined_sample <- trip_combined_sample[trip_time_in_secs > 0]
+```
 
-# Mean Fare amount and mean distance
-trip_combined_sample[ , .(mean(fare_amount), mean(trip_distance)), by = list(passenger_count)]
+## Univariate Analysis
 
-# Mean fare amount per unit distance
-trip_combined_sample[ , .(sum(fare_amount)/sum(trip_distance)), by = list(passenger_count)]
+### Distribution of Passenger Count
 
+Most of trips are single passenger trips. We do have 0 passenger trips. Maybe, they are trips for some delivery and does not include any passengers. And, there are some trips with 9 passengers. We are not excluding any trips based on passenger count as all of these seems to be genuine trips and may contribute towards the fare amount predictions.  
 
-# Plotting fare against distance
-ggplot(head(trip_combined_sample, 1000), aes(x=fare_amount, y=trip_distance))+geom_point()
+```{r}
+# Count trips group by passenger count
+plot_passenger_dist <- trip_combined_sample[, .N, by = list(passenger_count)]
 
-# Linear relationship
+# Convert the passenger count to a categorical variable
+plot_passenger_dist$passenger_count <- as.factor(plot_passenger_dist$passenger_count)
 
-# The vertical line in the plot might indicate again the fixed fare trips to/from JFK airport.
+# Visualize
+ggplot(plot_passenger_dist, aes(passenger_count, N, fill = passenger_count)) +
+  geom_col() +
+  scale_y_sqrt() +
+  labs(x = "Passenger Count", y = "Number of Trips")+
+  ggtitle("Histogram of Passenger Count") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none") + 
+  scale_colour_tableau()
+```
 
-jfk = c(-73.7822222222, 40.6441666667)
-nyc = c(-74.0063889, 40.7141667)
-ewr = c(-74.175, 40.69) # Newark Liberty International Airport, see https://www.travelmath.com/airport/EWR
-lgr = c(-73.87, 40.77) # LaGuardia Airport, see https://www.travelmath.com/airport/LGA
+### Distribution of Payment Type
 
-# hist where pickup from JFK
-hist(trip_combined_sample[round(pickup_latitude,2) == 40.64 & round(pickup_longitude,2) == -73.78]$fare_amount)
+Since there is no data dictionary for the abbreviated payment types. We are assuming *CRD* means a credit card transaction and *CSH* mean a cash transaction. *UNK* might be Unknown transactions. Most of the transactions are either *CRD* or *CSH*.  
 
-# hist where drop-off JFK
-hist(trip_combined_sample[round(dropoff_latitude,2) == 40.64 & round(dropoff_longitude,2) == -73.78]$fare_amount)
+```{r}
+# Count trips group by payment type
+plot_payment_type_dist <- trip_combined_sample[, .N, by = list(payment_type)]
 
+# Convert the payment type to a categorical variable
+plot_payment_type_dist$payment_type <- as.factor(plot_payment_type_dist$payment_type)
 
-trip_combined_sample[, fare_per_dist := fare_amount/trip_distance]
+# Visualize
+ggplot(plot_payment_type_dist, aes(payment_type, N, fill = payment_type)) +
+  geom_col() +
+  scale_y_sqrt() +
+  labs(x = "Payment Type", y = "Number of Trips")+
+  ggtitle("Histogram of Payment Type") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none") + 
+  scale_colour_tableau()
+```
 
+### Distribution of Fare Amount
 
-trip_combined_sample[fare_per_dist == 250]
-ggplot(head(trip_combined_sample, 10000), aes(x=trip_distance, y=fare_per_dist))+geom_point()
+Most of the trips are under $80 range. Some of the high fare amounts (>$100) needs to be explored further. So the fare amount should be a function of trip distance and trip duration. We will have a look if the high fares are justified by their corresponding trip distances and durations or if they are outliers.
 
-summary(trip_combined_sample)
+```{r}
+ggplot(trip_combined_sample, aes(fare_amount)) +
+  geom_histogram(binwidth = 20,
+                 col="black", 
+                 fill="light blue") +
+  labs(x = "Fare Amount", y = "Number of Trips")+
+  ggtitle("Histogram of Fare Amount") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "none") + 
+  scale_colour_tableau()
+```
 
-trip_combined_sample[, pickup_datetime_dt := as.POSIXct(pickup_datetime,format="%Y-%m-%d %H:%M:%OS")]
+### Distribution of Tip Amount
 
-plot_mean_fare_per_dist <- trip_combined_sample[, .(mean_fare_per_dist = mean(fare_per_dist)) , by = hour(pickup_datetime_dt)]
+Most of the tips are under $10 range. Some of the high tip amounts needs to be explored further along with fare amount to detect any outliers.
 
-ggplot(plot_mean_fare_per_dist, aes(x=hour, y=mean_fare_per_dist))+geom_line(color = 'red')
+```{r}
+ggplot(trip_combined_sample, aes(tip_amount)) +
+  geom_histogram(binwidth = 10,
+                 col="black", 
+                 fill="light blue") +
+  labs(x = "Tip Amount", y = "Number of Trips")+
+  ggtitle("Histogram of Tip Amount") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "none") + 
+  scale_colour_tableau()
+```
 
-plot_mean_time <- trip_combined_sample[, .(mean_time = mean(trip_time_in_secs)) , by = hour(pickup_datetime_dt)]
+### Distribution of Total Amount
 
-ggplot(plot_mean_time, aes(x=hour, y=mean_time))+geom_line(color = 'red')
+Most of the total amounts are under $100 range and are along the lines of fare amount.
 
+```{r}
+ggplot(trip_combined_sample, aes(total_amount)) +
+  geom_histogram(binwidth = 20,
+                 col="black", 
+                 fill="light blue") +
+  labs(x = "Total Amount", y = "Number of Trips")+
+  ggtitle("Histogram of Total Amount") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "none") + 
+  scale_colour_tableau()
+```
 
-plot_mean_time_fare <- trip_combined_sample[, .(mean_fare_per_dist = mean(fare_per_dist), mean_time = mean(trip_time_in_secs/60)) , by = hour(pickup_datetime_dt)]
+# Feature Engineering
 
-ggplot(plot_mean_time_fare) +
-  geom_line(aes(x=hour, y=mean_fare_per_dist), color = 'red') + 
-  geom_line(aes(x=hour, y=mean_time), color = 'blue')
+## Fare per unit distance
 
-trip_combined_sample[, list(pickup_longitude, pickup_latitude)]
-trip_combined_sample$pickup_dist_from_city <- distm(trip_combined_sample[,list(pickup_longitude, pickup_latitude)], nyc, fun = distHaversine)
+We know that fare amount comprises of multiple price components such as starting fare, fare per miles/kms, waiting fares, tolls, surcharges and other fees. The major component would be fare per miles/kms (for longer trips). Let's try to compute a fare per unit distance and try to find any abnormalities in the data that can impact predicting the fare prices. We will try to remove any records that are outside 2 standard deviations.
 
-hist(trip_combined_sample$pickup_dist_from_city)
+```{r}
+trip_combined_sample[, fare_per_dist := (fare_amount/trip_distance)]
+
+# Calculate 2 standard deviations
+trip_combined_sample[,.(min_fare = min(fare_per_dist), 
+                        max_fare = max(fare_per_dist),
+                        sd_2_fare_upper = mean(fare_per_dist) + 2 * sd(fare_per_dist), 
+                        sd_2_fare_lower = mean(fare_per_dist) - 2 * sd(fare_per_dist)
+                        )
+                     ]
+
+# Visualize if the trip duration has an impact on the high fare_per_dist for lower trip distances
+
+ggplot(head(trip_combined_sample, 10000)) + 
+  geom_point(aes(x=trip_distance, y=fare_per_dist, col = (trip_time_in_secs/60))) + 
+  labs(x = "Trip Distance", y = "Fare amount per unit distance") +
+  labs(col = "Trip Time (in mins)") +
+  ggtitle("Fare amount per unit distance Vs trip distance & time") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5))
 
 ```
+
+Looking at the chart above, it seems that some of the high fare does not have that high trip durations. They seem to be outliers. Let's remove the extreme tail ends of *fare_per_dist* (2 standard deviations)
+
+```{r}
+trip_combined_sample <- trip_combined_sample[fare_per_dist < (mean(fare_per_dist) + 2 * sd(fare_per_dist))]
+```
+
+## Day of week
+
+To analyse the impact of time/day on the number of trips, let's create new features/variables and see the impact of day of week on the volume of trips made. 
+
+```{r}
+trip_combined_sample[, pickup_wday := wday(pickup_datetime, label = TRUE)]
+
+plot_wday_trips <- trip_combined_sample[, .N, by = list(pickup_wday, vendor_id)]
+
+ggplot(plot_wday_trips, aes(pickup_wday, N, colour = vendor_id)) +
+  geom_point(size = 4) +
+  labs(x = "Day of the week", y = "Total number of pickups") +
+  labs(col = "Vendor") +
+  ggtitle("Taxi trips by day of the week") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+Looking at the chart above, it shows that *Tuesdays* were the busiest days for the month of April, 2013 followed by *Mondays*, *Saturdays* and *Fridays*.  
+
+## Hour of the day
+
+As the fares are dependent on the time of day (odd hours fares are higher than normal business hours fares), let's compute the hour of the day feature/variable to see the impact of time of the day on the volumes of trips and average fare amount.
+
+```{r}
+trip_combined_sample[, pickup_hour := hour(pickup_datetime)]
+
+plot_hourly_trips <- trip_combined_sample[, .N, by = list(pickup_hour)]
+
+ggplot(plot_hourly_trips, aes(reorder(pickup_hour, -N), N, fill = reorder(pickup_hour, -N))) +
+  geom_col() +
+  scale_y_sqrt() +
+  labs(x = "Hour of the day", y = "Total number of pickups") +
+  ggtitle("Taxi trips by hour of the day") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none")
+```
+
+From the chart, it is clear that the busiest hours are 7pm, 6pm, 8pm, 9pm and 10 pm. In short the evening times are the busiest from 6-10pm
+
+```{r}
+plot_hourly_fares <- trip_combined_sample[, .(mean_hourly_fare = mean(fare_amount)), by = list(pickup_hour)]
+
+ggplot(plot_hourly_fares, aes(reorder(pickup_hour, -mean_hourly_fare), mean_hourly_fare, fill = reorder(pickup_hour, -mean_hourly_fare))) +
+  geom_col() +
+  scale_y_sqrt() +
+  labs(x = "Hour of the day", y = "Average Fare Amount") +
+  ggtitle("Fare amount by hour of the day") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none")
+```
+
+Early morning fare averages are high peaking at 5am.
+
+```{r}
+plot_hourly_trip_duration <- trip_combined_sample[, .(mean_hourly_trip_duration = mean(trip_time_in_secs)), by = list(pickup_hour)]
+
+ggplot(plot_hourly_trip_duration, aes(reorder(pickup_hour, -mean_hourly_trip_duration), mean_hourly_trip_duration, fill = reorder(pickup_hour, -mean_hourly_trip_duration))) +
+  geom_col() +
+  scale_y_sqrt() +
+  labs(x = "Hour of the day", y = "Average Trip Duration") +
+  ggtitle("Trip Duration by hour of the day") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none")
+```
+
+Trip in the afternoons till evenings are longer duration trips, probably because of traffic.
+
+## Pickup distance from NYC centre
+
+To see which at the busiest locations for taxi pickup and the impact of location on fare amount, let us compute a feature/variable which depicts the distance from city center. The hypothesis is that the locations closer to city center will be the busiest.
+
+```{r}
+# New York City coordinates
+nyc = c(-74.0063889, 40.7141667)
+
+# Calculate distance from the city
+trip_combined_sample$pickup_dist_from_city <- distm(trip_combined_sample[,list(pickup_longitude, pickup_latitude)], nyc, fun = distHaversine)
+
+summary(trip_combined_sample$pickup_dist_from_city)
+
+ggplot(head(trip_combined_sample, 1000)) +
+  geom_point(aes(x=pickup_dist_from_city, y=trip_distance, col = fare_amount)) +
+  scale_color_gradientn(colours = rainbow(5))
+```
+
+
 
