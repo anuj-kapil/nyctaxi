@@ -1,12 +1,16 @@
 ---
-title: "main"
-output: html_document
+title: "New York Taxi Data"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
 ---
 # Loading R libraries
 
 The following R libraries have been used for the analysis.  
 
-```{r setup, include=TRUE, message=FALSE, warning=FALSE, cache=TRUE, autodep = TRUE, screenshot.force = TRUE, out.width="100%", dpi=300}
+```{r setup, include=TRUE, message=FALSE, warning=FALSE, cache=FALSE, autodep = TRUE, screenshot.force = TRUE, out.width="100%", dpi=300, cache.lazy = FALSE}
 knitr::opts_chunk$set(
 	echo = TRUE,
 	message = FALSE,
@@ -15,7 +19,8 @@ knitr::opts_chunk$set(
 	autodep = TRUE, 
 	screenshot.force = TRUE, 
 	out.width="100%", 
-	dpi=300
+	dpi=300,
+	cache.lazy = FALSE
 )
 # Install CRAN packages
 list.of.packages <- c(
@@ -26,20 +31,29 @@ list.of.packages <- c(
   "leaflet",
   "geosphere",
   "ggthemes",
-  "ggcorrplot"
+  "ggcorrplot",
+  "webshot",
+  "caret",
+  "xgboost",
+  "car"
 )
 
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[, "Package"])]
 if (length(new.packages)) install.packages(new.packages, repos = "https://cran.rstudio.com/", dependencies = T)
 
 suppressWarnings(suppressMessages(suppressPackageStartupMessages({
-library(data.table)
-library(tidyverse)
-library(lubridate)
-library(plotly)
-library(leaflet)
-library(geosphere)
-library(ggthemes)
+  library(data.table)
+  library(tidyverse)
+  library(lubridate)
+  library(plotly)
+  library(leaflet)
+  library(geosphere)
+  library(ggthemes)
+  library(ggcorrplot)
+  library(webshot)
+  library(caret)
+  library(xgboost)
+  library(car)
 })))
 ```
 
@@ -276,7 +290,7 @@ trip_combined_sample <- trip_combined_sample[dropoff_latitude %between% c(30, 50
 
 Let's visualize the pick-up lat longs on the map. We can see that most of trips are concentrated around Manhattan borough (often referred as the city) and some of the pick-ups are from nearby airports.  
 
-```{r}
+```{r fig.dim=c(2,2), out.width=NULL, screenshot.force=FALSE}
 leaflet(data = head(trip_combined_sample, 1000)) %>%
   addTiles()%>%
   #addProviderTiles("Stamen.TonerLite")%>%
@@ -584,7 +598,9 @@ trip_combined_sample[trip_combined_sample[, which.min(abs(fare_amount - mean(far
 
 # Multi-collinearity Analysis
 
-```{r out.width='100%'}
+Looking at the chart below, the fare amount has a fairly high linear relationship with trip distance and trip duration which is actually true as fare amount is directly proportional to the distance travelled and time taken by the trip.
+
+```{r out.width='100%', fig.dim=c(10,10)}
 trip_combined_sample_cormat <- trip_combined_sample[, 
                                                   list(rate_code,
                                                    pickup_datetime = as.numeric(pickup_datetime), 
@@ -598,7 +614,7 @@ trip_combined_sample_cormat <- trip_combined_sample[,
 
 corr <- cor(trip_combined_sample_cormat, use = "pairwise.complete.obs")
 
-library(ggcorrplot)
+
 ggcorrplot(corr, hc.order = FALSE, type = "lower",
            ggtheme = ggthemes::theme_gdocs,
            colors = c("#ff7f0e", "white", "#1f83b4"),
@@ -608,3 +624,217 @@ ggcorrplot(corr, hc.order = FALSE, type = "lower",
                   plot.title = element_text(hjust = 0.5)) 
 ```
 
+# Linear Regression
+
+Let's try to build a model for predicting the fare amount based on all the continous variables as shown in the above chart and also try to build a model using just the highly correlated independent variables *trip_distance* and *trip_time_in_secs* 
+
+## Split data into train and test datasets
+
+We will use 80% of the sample data to train the model and 20% of the data to test the model performance.
+
+```{r}
+# Setting seed for reproducible results
+set.seed(131)
+training_samples <- createDataPartition(trip_combined_sample_cormat$fare_amount, p = 0.8, list = FALSE)
+train_data  <- trip_combined_sample_cormat[training_samples, ]
+test_data <- trip_combined_sample_cormat[-training_samples, ]
+```
+
+## Train a multiple linear regression model
+
+For the first model, we will use all the continous variables
+
+```{r}
+# Train the model
+model_1<-lm(fare_amount~., data = train_data)
+model_summary <- summary(model_1)
+model_summary
+```
+
+The model summary tells us that all the independent variables are significant in predicting the final value of the dependent variable (fare amount). An R-squared of 94.37% is a pretty good measure of the model performance. We need to ensure we are not overfitting the model and there are no effects of multi-collinearity among the independent variables that can impact the model performance.
+
+## Testing the model performance
+
+We will use root mean square error (RMSE) and R-squared (R2) to measure and test the model performance.  
+
+RMSE is the mean error on the predictions and tell us how far the predicted value is from actual. For this metric, the lower the error, the better is the model perfomance.  
+
+R2 is the measure of proportion of the variability in the data that can be explained by the variations in the independent variables. Ideally, 100% of the variation in the dependent variable must be explained by the variations in the independent variables. So, for this metric, the higher values suggests a better performing model.
+
+```{r}
+# Make predictions
+predictions <-  predict(model_1, test_data)
+# Model performance
+data.table(
+  RMSE = RMSE(predictions, test_data$fare_amount),
+  R2 = R2(predictions, test_data$fare_amount)
+)
+```
+
+To detect multicollinearity in a regression model, will test the Variance Inflation Factor (VIF) of each of the independent variables. The cut-off of VIF = 5 is used to determine the magnitude of multicollinearity and the variables that have VIF>5 are generally removed from the regression model.
+
+```{r}
+vif(model_1)
+```
+
+The VIF for two of the independent variables is quite high. *pickup_datetime* and *dropoff_datetime*  
+Let's remove these variable and try the regression model.
+
+```{r}
+# Train the model
+model_2<-lm(fare_amount~. -pickup_datetime-dropoff_datetime, data = train_data)
+model_summary <- summary(model_2)
+model_summary
+
+# Make predictions
+predictions <-  predict(model_2, test_data)
+# Model performance
+data.table(
+  RMSE = RMSE(predictions, test_data$fare_amount),
+  R2 = R2(predictions, test_data$fare_amount)
+)
+
+vif(model_2)
+```
+
+Both the RMSE and R2 gets better by removing the two high VIF variables, but the change in model performance is not that significant. The VIF of *model_2* improves. Hence, the *model_2* is better than *model_1* 
+
+Let's also look at predicting the fare amount solely based on trip distance and trip duration and see if the model performance improves or declines.
+
+```{r}
+# Train the model
+model_3<-lm(fare_amount~trip_distance+trip_time_in_secs, data = train_data)
+model_summary <- summary(model_3)
+model_summary
+
+# Make predictions
+predictions <-  predict(model_3, test_data)
+
+# Model performance
+data.table(
+  RMSE = RMSE(predictions, test_data$fare_amount),
+  R2 = R2(predictions, test_data$fare_amount)
+)
+
+vif(model_3)
+```
+
+The RMSE increases and R-squared decreases for the third model with just two independent variables, which makes the *model_2* as the best model so far.
+
+# Machine Learning
+
+## xgboost model
+
+Next we try to fit a machine learning model to our data and see if we can get a better performing model. We are going to try Extreme gradient boosting (xgboot) model for our regression problem. Here we are fitting a xgboost model with randomly chosen hyperparameters using the same training dataset that we used earlier in the linear model and test the model performance using the same metrics and same test dataset that we have used earlier.
+
+```{r}
+xg_train <- xgb.DMatrix(data.matrix(train_data[, names(train_data)[1:12],with=FALSE])
+                        , label = train_data$fare_amount
+                        , missing = NaN
+                        )
+
+xg_test <- xgb.DMatrix(data.matrix(test_data[, names(test_data)[1:12],with=FALSE])
+                       , label = test_data$fare_amount
+                       , missing = NaN
+                      )
+
+
+# Hyperparameter has been randomly chosen but can be tuned using a gridsearch method
+model_4 <- xgboost(data = xg_train, # training data as matrix
+                          label = train_data$fare_amount,  # column of outcomes
+                          nrounds = 100,       # number of trees to build
+                          objective = 'reg:squarederror', # objective
+                          eta = 0.3,
+                          depth = 6,
+                          verbose = 0  # silent
+)
+
+# Make predictions
+pred <- predict(model_4, xg_test)
+
+data.table(
+  RMSE = RMSE(pred, test_data$fare_amount),
+  R2 = R2(pred, test_data$fare_amount)
+)
+```
+
+We can see that the machine learning model performs much better than linear regression with a lower RMSE and better R-squared
+
+```{r}
+xgb.importance(names(train_data)[1:12], model = model_4)
+```
+
+The feature importance shows the top two features are *trip_distance* and *trip_time_in_secs*  
+
+# Mean values as central tendency
+
+We have already established that our data has outliers and the distribution of fare amount and trip duration is positively right skewed. Since the distribution is not normal, the respective means for fare amount and trip duration cannot be treated as a measure of central tendency unless we try to make the distribution normal by removing the outliers or by transforming the variables (fare and distance).
+
+# Maximize earnings in a day
+
+Assuming an 8-hour shift, let's see which starting hour of the shift in a day gives maximun earnings 
+
+```{r}
+sum_earnings_hr <- trip_combined_sample[, .(fare_amount_sum = sum(fare_amount)), by = list(pickup_hour)][order(pickup_hour)]
+
+# Append first 7 hours earnings at the end to handle the corner cases of rolling sum
+sum_earnings_hr <- rbind(sum_earnings_hr, head(sum_earnings_hr, 7))
+
+sum_earnings_hr[, shift_earnings := frollsum(fare_amount_sum, n = 8, align = 'left')]
+
+# Drop the records that were appended for handling corner cases
+sum_earnings_hr <- sum_earnings_hr[!is.na(shift_earnings)]
+
+ggplot(sum_earnings_hr, aes(reorder(pickup_hour, -shift_earnings), shift_earnings, fill = reorder(pickup_hour, -shift_earnings))) +
+  geom_col() +
+  scale_y_sqrt() +
+  labs(x = "Hour of the day", y = "Total earnings") +
+  ggtitle("Total earnings for 8 hour shift by starting hour ") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none")
+```
+
+From the chart, it is clear that to maximise the earnings, it is better to start the 8-hour shift from 4pm (evenings)
+
+# Minimize work time in a day
+
+Here the assumption is that work time is calculated by the time spent working on trips (trip durations).  
+Again assuming an 8-hour shift, let's see which starting hour of the shift in a day gives more than average earnings by spending least amount of trip hours
+
+```{r}
+sum_earnings_trips_hr <- trip_combined_sample[, .(fare_amount_sum = sum(fare_amount), trip_time_sum = sum(trip_time_in_secs)), by = list(pickup_hour)][order(pickup_hour)]
+
+# Append first 7 hours earnings at the end to handle the corner cases of rolling sum
+sum_earnings_trips_hr <- rbind(sum_earnings_trips_hr, head(sum_earnings_trips_hr, 7))
+
+sum_earnings_trips_hr[, fare_amount_sum_shift := frollmean(fare_amount_sum, n = 8, align = 'left')]
+sum_earnings_trips_hr[, trip_time_sum_shift := frollmean(trip_time_sum, n = 8, align = 'left')]
+
+# Drop the records that were appended for handling corner cases
+sum_earnings_trips_hr <- sum_earnings_trips_hr[!is.na(fare_amount_sum_shift)]
+
+ggplot(sum_earnings_trips_hr[fare_amount_sum_shift>=mean(fare_amount_sum_shift)], 
+       aes(reorder(pickup_hour, trip_time_sum_shift), trip_time_sum_shift, fill = reorder(pickup_hour, trip_time_sum_shift))) +
+  geom_col() +
+  scale_y_sqrt() +
+  labs(x = "Hour of the day", y = "Total trip durations") +
+  ggtitle("Total trip durations for 8 hour shift by starting hour") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none")
+```
+
+The chart shows if we start the 8-hour shift from 7pm (evenings), we will be spent the least time on taxi trips while still maintaining average earnings.
+
+# Maximising 10 taxis fleet
+
+Based on the given data:  
+
+* Assuming a percentage share in the fare, target the pickups in the evenings after 4pm
+* Considering the expenses on repair/replace of taxis, target shorter trips (time/distance) while still maintaing average fare income
+* Not considering the competiton, the target location would be within 10kms radius from NYC center
+* Newer taxis could be targetted for longer trip hotspots while older ones can be targetted for shorter trips
+* More complex analysis can be done the taxi ideal time/location compared to the demand time/location and redirecting taxis based on an optimisation algorithm
