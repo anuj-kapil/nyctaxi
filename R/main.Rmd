@@ -6,11 +6,16 @@ output: html_document
 
 The following R libraries have been used for the analysis.  
 
-```{r setup, include=TRUE, message=FALSE, warning=FALSE}
+```{r setup, include=TRUE, message=FALSE, warning=FALSE, cache=TRUE, autodep = TRUE, screenshot.force = TRUE, out.width="100%", dpi=300}
 knitr::opts_chunk$set(
 	echo = TRUE,
 	message = FALSE,
-	warning = FALSE
+	warning = FALSE, 
+	cache=TRUE, 
+	autodep = TRUE, 
+	screenshot.force = TRUE, 
+	out.width="100%", 
+	dpi=300
 )
 # Install CRAN packages
 list.of.packages <- c(
@@ -20,7 +25,8 @@ list.of.packages <- c(
   "plotly",
   "leaflet",
   "geosphere",
-  "ggthemes"
+  "ggthemes",
+  "ggcorrplot"
 )
 
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[, "Package"])]
@@ -514,13 +520,91 @@ nyc = c(-74.0063889, 40.7141667)
 
 # Calculate distance from the city
 trip_combined_sample$pickup_dist_from_city <- distm(trip_combined_sample[,list(pickup_longitude, pickup_latitude)], nyc, fun = distHaversine)
+```
+
+Converting distance in meters to kilometers
+
+```{r}
+# Convert distance to km
+trip_combined_sample[, pickup_dist_from_city := round(pickup_dist_from_city/1000, 2)]
 
 summary(trip_combined_sample$pickup_dist_from_city)
+```
 
-ggplot(head(trip_combined_sample, 1000)) +
-  geom_point(aes(x=pickup_dist_from_city, y=trip_distance, col = fare_amount)) +
-  scale_color_gradientn(colours = rainbow(5))
+The summary shows the maximum distance of a pickup from city center is 1200 km and is consistent with the ~1000km radius we applied to the sample dataset based on lat and long degrees. 75% of the pickups are within 7km from city centre.
+
+```{r}
+trip_combined_sample[, km_bin := cut(trip_combined_sample$pickup_dist_from_city, 
+                                     seq(0, max(pickup_dist_from_city) + 2, by = 2),  
+                                     include.lowest = TRUE, 
+                                     right = FALSE)]
+
+plot_distance_from_city <- trip_combined_sample[pickup_dist_from_city <=30, .N, by = list(km_bin)]
+
+ggplot(plot_distance_from_city, aes(reorder(km_bin, -N), N, fill = reorder(km_bin, -N))) +
+  geom_col() +
+  scale_y_sqrt() +
+  labs(x = "Distance from city (km) 2 km bins", y = "Number of pickups") +
+  ggtitle("Number of pickups by distance from city") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none")
+```
+
+The above chart shows top ten locations (in terms of radial distance from NYC center). The top 5 busiest locations are within 10km radius of the New York city center. 
+
+## Trip with highest Standard Deviation 
+
+The 100% of the trip duration ranges from min to max (1, 10800) secs. The 99.7% of the trip duration range as per 3 standard deviation are (-895.3775, 2397.632). The sample dataset does not have any negative values and is positively right skewed. Hence, the trip with max trip duration of 10800 secs is the trip with the highest standard deviation
+
+```{r}
+trip_combined_sample[ , .(min = min(trip_time_in_secs), max = max(trip_time_in_secs))]
+trip_combined_sample[ , .(lower_bound = mean(trip_time_in_secs) - 3*sd(trip_time_in_secs), upper_bound = mean(trip_time_in_secs) + 3*sd(trip_time_in_secs))]
+
+ggplot(trip_combined_sample, aes(trip_time_in_secs, fill = "red", colour = 'red')) +
+  geom_density(adjust = 5, alpha = 0.2) +
+  labs(x = "Trip Duration (in secs)", y = "Density") +
+  ggtitle("Density plot of Trip Duration") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none")
 ```
 
 
+
+## Standard Deviation of Fare Amount
+
+Trip with the most consistent fare amount is the one with the least standard deviation which implies the trip with the fare amount closest to the mean fare amount.
+
+```{r}
+trip_combined_sample[trip_combined_sample[, which.min(abs(fare_amount - mean(fare_amount)))]]
+```
+
+# Multi-collinearity Analysis
+
+```{r out.width='100%'}
+trip_combined_sample_cormat <- trip_combined_sample[, 
+                                                  list(rate_code,
+                                                   pickup_datetime = as.numeric(pickup_datetime), 
+                                                   dropoff_datetime = as.numeric(dropoff_datetime),
+                                                   passenger_count, trip_time_in_secs, trip_distance, 
+                                                   pickup_longitude, pickup_latitude, 
+                                                   dropoff_longitude, dropoff_latitude, 
+                                                   pickup_wday = as.numeric(trip_combined_sample$pickup_wday),
+                                                   pickup_hour, pickup_dist_from_city, fare_amount)]
+
+
+corr <- cor(trip_combined_sample_cormat, use = "pairwise.complete.obs")
+
+library(ggcorrplot)
+ggcorrplot(corr, hc.order = FALSE, type = "lower",
+           ggtheme = ggthemes::theme_gdocs,
+           colors = c("#ff7f0e", "white", "#1f83b4"),
+           lab = TRUE) +
+            ggtitle("Correlation Matrix") +
+            theme(panel.grid.major=element_blank(),
+                  plot.title = element_text(hjust = 0.5)) 
+```
 

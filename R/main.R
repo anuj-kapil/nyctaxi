@@ -312,11 +312,27 @@ ggplot(trip_combined_sample, aes(total_amount)) +
 # 10000/60/60
 # 
 # 
-# plot_sd <- trip_combined_sample[, sd(trip_time_in_secs), by = cut_interval(trip_time_in_secs/60/60, 12)]
-# 
-# ggplot(data=plot_sd, aes(x=cut_interval, y = V1, fill = cut_interval)) +
-#   geom_col() +
-#   labs(title="Histogram", x="Time interval", y="Count")
+
+trip_combined_sample[, qtr_hr_bin := cut(trip_time_in_secs/60/60, 
+                                        seq(0,3, by = .25), 
+                                        include.lowest = TRUE, 
+                                        right = FALSE)]
+
+plot_sd <- trip_combined_sample[, .(sd_trip_duration = sd(trip_time_in_secs)), by = list(qtr_hr_bin)]
+
+ggplot(plot_sd, aes(reorder(qtr_hr_bin, -sd_trip_duration), sd_trip_duration, fill = reorder(qtr_hr_bin, -sd_trip_duration))) +
+  geom_col() +
+  scale_y_sqrt() +
+  labs(x = "Trip Duration (in hrs) quarter hour bins", y = "Standard Deviation") +
+  ggtitle("Trip Duration Standard Deviation by quarter hour bins") +
+  theme(panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none")
+
+ggplot(data=plot_sd, aes(x=cut_interval, y = V1, fill = cut_interval)) +
+  geom_col() +
+  labs(title="Histogram", x="Time interval", y="Count")
 # 
 # trip_combined_sample[trip_time_in_secs <= 15*60, sd(trip_time_in_secs)]
 # 
@@ -490,3 +506,6 @@ trip_combined_sample$fare_amount
 ggplot(head(trip_combined_sample, 50000)) +
   geom_point(aes(x=pickup_dist_from_city, y=trip_distance, col = fare_amount)) +
   scale_color_gradientn(colours = rainbow(5))
+
+
+?cut
