@@ -72,6 +72,22 @@ fwrite(trip_combined_sample, 'Data/trip_combined_sample.csv')
 
 trip_combined_sample <- fread('Data/trip_combined_sample.csv.gz')
 
+# Trips
+trip_combined_sample[,.N]
+
+# Vendor
+trip_combined_sample[, uniqueN(vendor_id)]
+
+# Medallions
+trip_combined_sample[, uniqueN(medallion)]
+
+# Drivers
+trip_combined_sample[, uniqueN(hack_license)]
+
+# Trip distance total
+trip_combined_sample[, sum(trip_distance)]
+
+
 # Missing data
 glimpse(trip_combined_sample)
 
@@ -177,7 +193,7 @@ ggplot(trip_combined_sample, aes(x="dropoff_longitude", y=dropoff_longitude)) +
         axis.ticks.x = element_blank()) +
   scale_colour_tableau()
 
-# NYC range within 1000 kms radius (1 degree equal appox 111 kms) and NYC coordinates are 40.7141667 lat and -74.0063889 long
+# NYC range within 1000 kms radius (1 degree equal approx 111 kms) and NYC coordinates are 40.7141667 lat and -74.0063889 long
 trip_combined_sample <- trip_combined_sample[pickup_latitude %between% c(30, 50) & pickup_longitude %between% c(-84, -64)]
 trip_combined_sample <- trip_combined_sample[dropoff_latitude %between% c(30, 50) & dropoff_longitude %between% c(-84, -64)]
 
@@ -228,9 +244,9 @@ plot_passenger_dist <- trip_combined_sample[, .N, by = list(passenger_count)]
 plot_passenger_dist$passenger_count <- as.factor(plot_passenger_dist$passenger_count)
 ggplot(plot_passenger_dist, aes(passenger_count, N, fill = passenger_count)) +
   geom_col() +
-  scale_y_sqrt() +
-  labs(x = "Passenger Count", y = "Number of Trips")+
-  ggtitle("Histogram of Passenger Count") +
+  scale_y_continuous(labels = scales::comma)+
+  labs(x = "Number of Passengers", y = "Number of Trips (April 2013)")+
+  ggtitle("Number of Passengers/Trip") +
   theme_bw() +
   theme(panel.border = element_blank(),  panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), plot.title = element_text(hjust = 0.5))+
   theme(legend.position = "none") + 
@@ -243,11 +259,11 @@ plot_payment_type_dist <- trip_combined_sample[, .N, by = list(payment_type)]
 plot_payment_type_dist$payment_type <- as.factor(plot_payment_type_dist$payment_type)
 
 # Visualize
-ggplot(plot_payment_type_dist, aes(payment_type, N, fill = payment_type)) +
+ggplot(plot_payment_type_dist, aes(payment_type, N/sum(N), fill = payment_type)) +
   geom_col() +
-  scale_y_sqrt() +
+  scale_y_continuous(labels = scales::percent)+
   labs(x = "Payment Type", y = "Number of Trips")+
-  ggtitle("Histogram of Payment Type") +
+  ggtitle("Payment Type/Trip") +
   theme_bw() +
   theme(panel.border = element_blank(),  panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), plot.title = element_text(hjust = 0.5))+
   theme(legend.position = "none") + 
